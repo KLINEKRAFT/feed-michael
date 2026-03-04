@@ -58,7 +58,7 @@ html, body {
 }
 
 #score {
-  width: 170px;
+  width: 260px;
   height: 42px;
   image-rendering: pixelated;
   image-rendering: crisp-edges;
