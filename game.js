@@ -7,15 +7,15 @@
     open: "assets/michael_open.png",
     burger: "assets/burger.png",
     feedBtn: "assets/feed_button.png",
-    digits: "assets/digits.png",
+    digits: "assets/digits.jpg", // NOTE: JPEG w/ magenta background
   };
 
   // ====== CANVAS INTERNAL RESOLUTION ======
   const W = 360;
   const H = 640;
 
-  // ====== MICHAEL SCALING (prevents giant face filling screen) ======
-  // With 1024x1024 sprites, keep him smaller on screen:
+  // ====== MICHAEL SCALING ======
+  // Prevents the face from ever filling the screen, even with 1024x1024 sprites.
   const MICHAEL_MAX_W = 0.75; // max 75% of canvas width
   const MICHAEL_MAX_H = 0.45; // max 45% of canvas height
   const MICHAEL_POS = { x: W / 2, y: 300 };
@@ -25,15 +25,15 @@
     startX: W / 2,
     startY: 520,
     endX: W / 2,
-    endY: 320,       // mouth target (tweak 300–340 if needed)
+    endY: 320,       // tweak 300–340 to land perfectly in mouth
     durationMs: 340,
     wobble: 12,
   };
 
   // ====== ANIMATION TIMINGS ======
-  const MOUTH_OPEN_MS = 140;    // quick open immediately on press
-  const CHEW_TOTAL_MS = 650;    // chew duration after burger lands
-  const CHEW_FRAME_MS = 85;     // toggle open/idle to simulate chewing
+  const MOUTH_OPEN_MS = 140;
+  const CHEW_TOTAL_MS = 650;
+  const CHEW_FRAME_MS = 85;
 
   // ====== SCORE POPUP ======
   const POPUP_LIFE_MS = 650;
@@ -46,41 +46,37 @@
   const scoreCanvas = document.getElementById("score");
   const scoreCtx = scoreCanvas.getContext("2d", { alpha: true });
 
-  const htmlFeedBtn = document.getElementById("feedBtn");
+  const feedBtn = document.getElementById("feedBtn");
   const hint = document.getElementById("hint");
-  const music = document.getElementById("bgMusic"); // from index.html
+  const music = document.getElementById("bgMusic");
+
+  // Set internal canvas resolution
+  canvas.width = W;
+  canvas.height = H;
 
   // Pixel-perfect rendering
   ctx.imageSmoothingEnabled = false;
   scoreCtx.imageSmoothingEnabled = false;
 
-  // Set internal canvas resolution (critical)
-  canvas.width = W;
-  canvas.height = H;
-
-  // ====== GAME STATE ======
+  // ====== STATE ======
   const GameState = { TITLE: "TITLE", PLAY: "PLAY" };
   let state = GameState.TITLE;
 
   let score = 0;
-
-  // mouth open window
   let mouthOpenUntil = 0;
 
-  // burger flight
   let burgerActive = false;
   let burgerStartTs = 0;
 
-  // chew cycle
   let chewUntil = 0;
 
-  // score popups: {x,y,startTs,amount}
-  const popups = [];
-
-  // images
+  const popups = []; // {x,y,startTs,amount}
   const img = {};
 
-  // ====== HELPERS ======
+  // Digits: we will preprocess the magenta background into transparency once.
+  // We'll render from this offscreen canvas.
+  let digitsKeyedCanvas = null;
+
   function now() { return performance.now(); }
   function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
 
@@ -93,7 +89,6 @@
     });
   }
 
-  // Draw image to cover the full canvas while preserving aspect
   function drawCover(image) {
     const scale = Math.max(W / image.width, H / image.height);
     const dw = Math.floor(image.width * scale);
@@ -103,7 +98,6 @@
     ctx.drawImage(image, dx, dy, dw, dh);
   }
 
-  // Compute Michael scale so he always fits and never fills the screen
   function computeMichaelScale() {
     const base = img.idle || img.open;
     if (!base) return 1;
@@ -122,59 +116,104 @@
     ctx.drawImage(image, Math.floor(x - dw / 2), Math.floor(y - dh / 2), dw, dh);
   }
 
-  // ====== SCORE HUD (digits.png assumed row 0-9) ======
+  // ============================================================
+  // Magenta keying for digits.jpg
+  // ============================================================
+  function keyOutMagentaToCanvas(sourceImg) {
+    const c = document.createElement("canvas");
+    c.width = sourceImg.width;
+    c.height = sourceImg.height;
+    const cctx = c.getContext("2d", { willReadFrequently: true });
+
+    cctx.imageSmoothingEnabled = false;
+    cctx.drawImage(sourceImg, 0, 0);
+
+    const imgData = cctx.getImageData(0, 0, c.width, c.height);
+    const data = imgData.data;
+
+    // JPEG will have compression noise, so use a tolerance.
+    // Target magenta: (255, 0, 255)
+    const tol = 70;
+
+    for (let i = 0; i < data.length; i += 4) {
+      const r = data[i + 0];
+      const g = data[i + 1];
+      const b = data[i + 2];
+
+      const isMagenta =
+        Math.abs(r - 255) <= tol &&
+        g <= tol && // green near 0
+        Math.abs(b - 255) <= tol;
+
+      if (isMagenta) {
+        data[i + 3] = 0; // alpha to 0
+      }
+    }
+
+    cctx.putImageData(imgData, 0, 0);
+    return c;
+  }
+
+  // ============================================================
+  // Score rendering (expects digits in ONE ROW 0–9)
+  // ============================================================
   function drawScore(n) {
-    const dimg = img.digits;
-    if (!dimg) return;
+    const dsrc = digitsKeyedCanvas;
+    if (!dsrc) return;
 
     scoreCtx.clearRect(0, 0, scoreCanvas.width, scoreCanvas.height);
 
     const text = String(n);
-    const digitW = Math.floor(dimg.width / 10);
-    const digitH = dimg.height;
 
+    const digitW = Math.floor(dsrc.width / 10);
+    const digitH = dsrc.height;
+
+    // Scale up a bit for readability in the HUD
     const scale = 2;
     const totalW = text.length * digitW * scale;
 
     let x = Math.floor((scoreCanvas.width - totalW) / 2);
     const y = Math.floor((scoreCanvas.height - digitH * scale) / 2);
 
+    scoreCtx.imageSmoothingEnabled = false;
+
     for (const ch of text) {
       const d = ch.charCodeAt(0) - 48;
+      if (d < 0 || d > 9) continue;
+
       const sx = d * digitW;
+
       scoreCtx.drawImage(
-        dimg,
+        dsrc,
         sx, 0, digitW, digitH,
         x, y, digitW * scale, digitH * scale
       );
+
       x += digitW * scale;
     }
   }
 
-  // Make the FEED button use your pixel-art button image
   function skinFeedButton() {
     if (!img.feedBtn) return;
-    htmlFeedBtn.style.backgroundImage = `url(${ASSETS.feedBtn})`;
-    htmlFeedBtn.style.backgroundSize = "contain";
-    htmlFeedBtn.style.backgroundRepeat = "no-repeat";
-    htmlFeedBtn.style.backgroundPosition = "center";
-    htmlFeedBtn.style.color = "transparent";
+    feedBtn.style.backgroundImage = `url(${ASSETS.feedBtn})`;
+    feedBtn.style.backgroundSize = "contain";
+    feedBtn.style.backgroundRepeat = "no-repeat";
+    feedBtn.style.backgroundPosition = "center";
+    feedBtn.style.color = "transparent";
   }
 
   // ============================================================
-  //  WebAudio SFX (NO FILES)
+  // WebAudio SFX (NO FILE DOWNLOADS)
   // ============================================================
   let audioCtx = null;
   let masterGain = null;
-  let sfxEnabled = true;
 
   function ensureAudio() {
-    if (!sfxEnabled) return;
     if (!audioCtx) {
       const AC = window.AudioContext || window.webkitAudioContext;
       audioCtx = new AC();
       masterGain = audioCtx.createGain();
-      masterGain.gain.value = 0.35; // overall SFX volume
+      masterGain.gain.value = 0.35;
       masterGain.connect(audioCtx.destination);
     }
     if (audioCtx.state === "suspended") {
@@ -183,14 +222,13 @@
   }
 
   function playBlip() {
-    if (!sfxEnabled) return;
     ensureAudio();
     if (!audioCtx || !masterGain) return;
 
     const t = audioCtx.currentTime;
 
     const osc = audioCtx.createOscillator();
-    osc.type = "square"; // retro
+    osc.type = "square";
     osc.frequency.setValueAtTime(880, t);
     osc.frequency.exponentialRampToValueAtTime(1320, t + 0.06);
 
@@ -207,19 +245,16 @@
   }
 
   function playChomp() {
-    if (!sfxEnabled) return;
     ensureAudio();
     if (!audioCtx || !masterGain) return;
 
     const t = audioCtx.currentTime;
 
-    // Create a quick noise burst (bite texture)
     const duration = 0.12;
     const bufferSize = Math.floor(audioCtx.sampleRate * duration);
     const buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
     const data = buffer.getChannelData(0);
 
-    // Pink-ish noise-ish (simple filtered randomness)
     let last = 0;
     for (let i = 0; i < bufferSize; i++) {
       const white = (Math.random() * 2 - 1);
@@ -246,7 +281,6 @@
     noise.start(t);
     noise.stop(t + duration);
 
-    // Add a tiny “thunk” tone under it
     const osc = audioCtx.createOscillator();
     osc.type = "triangle";
     osc.frequency.setValueAtTime(180, t);
@@ -264,7 +298,9 @@
     osc.stop(t + 0.11);
   }
 
-  // ====== ACTIONS ======
+  // ============================================================
+  // GAME ACTIONS
+  // ============================================================
   function startGame() {
     state = GameState.PLAY;
     hint.textContent = "Tap FEED to score.";
@@ -276,10 +312,10 @@
     chewUntil = 0;
     popups.length = 0;
 
-    // Ensure SFX works on iOS after first gesture
+    // iOS requirement: init audio from a gesture
     ensureAudio();
 
-    // Start music after user gesture (iOS/Safari requirement)
+    // start background music
     if (music) {
       music.volume = 0.35;
       music.play().catch(() => {});
@@ -298,31 +334,28 @@
   function doFeed() {
     if (state !== GameState.PLAY) return;
 
-    // SFX: button press blip
     playBlip();
 
-    // Open mouth briefly right away
     mouthOpenUntil = now() + MOUTH_OPEN_MS;
 
-    // Start burger flight
     burgerActive = true;
     burgerStartTs = now();
 
-    // Score increments on press
     score += 1;
     drawScore(score);
 
-    // Popup +1
     addPopup(1);
   }
 
-  // ====== INPUT ======
+  // ============================================================
+  // INPUT
+  // ============================================================
   canvas.addEventListener("pointerdown", (e) => {
     e.preventDefault();
     if (state === GameState.TITLE) startGame();
   });
 
-  htmlFeedBtn.addEventListener("click", () => {
+  feedBtn.addEventListener("click", () => {
     if (state === GameState.TITLE) startGame();
     else doFeed();
   });
@@ -335,14 +368,15 @@
     }
   });
 
-  // ====== RENDER ======
+  // ============================================================
+  // RENDER
+  // ============================================================
   function renderTitle() {
     ctx.fillStyle = "#000";
     ctx.fillRect(0, 0, W, H);
 
     if (img.title) drawCover(img.title);
 
-    // Hint bar at bottom
     ctx.fillStyle = "rgba(0,0,0,0.45)";
     ctx.fillRect(0, H - 56, W, 56);
 
@@ -387,7 +421,6 @@
 
     const michaelScale = computeMichaelScale();
 
-    // Choose Michael frame:
     let michaelFrame = img.idle;
 
     if (ts < chewUntil) {
@@ -403,19 +436,16 @@
       drawCenteredScaled(michaelFrame, MICHAEL_POS.x, MICHAEL_POS.y, michaelScale);
     }
 
-    // Burger flight animation
     if (burgerActive && img.burger) {
       const t0 = (ts - burgerStartTs) / BURGER.durationMs;
       const t = clamp(t0, 0, 1);
 
-      // Ease-out cubic
       const ease = 1 - Math.pow(1 - t, 3);
 
       const xWobble = Math.sin(t * Math.PI) * BURGER.wobble;
       const x = BURGER.startX + (BURGER.endX - BURGER.startX) * ease + xWobble;
       const y = BURGER.startY + (BURGER.endY - BURGER.startY) * ease;
 
-      // Burger size relative to Michael
       const burgerBaseScale = Math.min(1.0, michaelScale * 0.55);
       const shrink = 1 - (0.25 * t);
       const s = burgerBaseScale * shrink;
@@ -428,8 +458,6 @@
       if (t >= 1) {
         burgerActive = false;
         chewUntil = ts + CHEW_TOTAL_MS;
-
-        // SFX: chomp when it "hits" the mouth
         playChomp();
       }
     }
@@ -446,7 +474,9 @@
     requestAnimationFrame(loop);
   }
 
-  // ====== BOOT ======
+  // ============================================================
+  // BOOT
+  // ============================================================
   async function boot() {
     hint.textContent = "Loading…";
 
@@ -454,6 +484,9 @@
     for (const [key, src] of entries) {
       img[key] = await loadImage(src);
     }
+
+    // Convert digits.jpg magenta background to transparency once
+    digitsKeyedCanvas = keyOutMagentaToCanvas(img.digits);
 
     skinFeedButton();
     drawScore(score);
