@@ -7,7 +7,7 @@
     open: "assets/michael_open.png",
     burger: "assets/burger.png",
     feedBtn: "assets/feed_button.png",
-    digits: "assets/digits.jpg", // NOTE: JPEG w/ magenta background
+    digits: "assets/digits.png", // <-- now PNG
   };
 
   // ====== CANVAS INTERNAL RESOLUTION ======
@@ -15,9 +15,8 @@
   const H = 640;
 
   // ====== MICHAEL SCALING ======
-  // Prevents the face from ever filling the screen, even with 1024x1024 sprites.
-  const MICHAEL_MAX_W = 0.75; // max 75% of canvas width
-  const MICHAEL_MAX_H = 0.45; // max 45% of canvas height
+  const MICHAEL_MAX_W = 0.75;
+  const MICHAEL_MAX_H = 0.45;
   const MICHAEL_POS = { x: W / 2, y: 300 };
 
   // ====== BURGER FLIGHT ======
@@ -25,7 +24,7 @@
     startX: W / 2,
     startY: 520,
     endX: W / 2,
-    endY: 320,       // tweak 300–340 to land perfectly in mouth
+    endY: 320,        // tweak 300–340 if burger misses mouth
     durationMs: 340,
     wobble: 12,
   };
@@ -39,6 +38,15 @@
   const POPUP_LIFE_MS = 650;
   const POPUP_RISE = 42;
 
+  // ====== COMBO SETTINGS ======
+  const COMBO_WINDOW_MS = 650;   // must feed again within this time
+  const COMBO_MAX = 3;           // 1x, 2x, 3x
+  const BIG_BITE_SHAKE_AT = 3;   // shake when multiplier is 3x
+  const SHAKE_MS = 160;
+
+  // ====== HIGH SCORE ======
+  const LS_KEY = "feedMichaelHighScore";
+
   // ====== DOM ======
   const canvas = document.getElementById("game");
   const ctx = canvas.getContext("2d", { alpha: false });
@@ -50,11 +58,9 @@
   const hint = document.getElementById("hint");
   const music = document.getElementById("bgMusic");
 
-  // Set internal canvas resolution
   canvas.width = W;
   canvas.height = H;
 
-  // Pixel-perfect rendering
   ctx.imageSmoothingEnabled = false;
   scoreCtx.imageSmoothingEnabled = false;
 
@@ -63,6 +69,8 @@
   let state = GameState.TITLE;
 
   let score = 0;
+  let highScore = loadHighScore();
+
   let mouthOpenUntil = 0;
 
   let burgerActive = false;
@@ -70,15 +78,35 @@
 
   let chewUntil = 0;
 
-  const popups = []; // {x,y,startTs,amount}
+  // Combo tracking
+  let lastFeedTs = 0;
+  let combo = 1; // 1..3
+
+  // Screen shake
+  let shakeUntil = 0;
+  let shakePower = 0;
+
+  const popups = []; // {x,y,startTs,amount,text}
+
   const img = {};
 
-  // Digits: we will preprocess the magenta background into transparency once.
-  // We'll render from this offscreen canvas.
-  let digitsKeyedCanvas = null;
-
+  // ====== HELPERS ======
   function now() { return performance.now(); }
   function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
+
+  function loadHighScore() {
+    try {
+      const v = localStorage.getItem(LS_KEY);
+      const n = v ? parseInt(v, 10) : 0;
+      return Number.isFinite(n) ? n : 0;
+    } catch {
+      return 0;
+    }
+  }
+
+  function saveHighScore(n) {
+    try { localStorage.setItem(LS_KEY, String(n)); } catch {}
+  }
 
   function loadImage(src) {
     return new Promise((resolve, reject) => {
@@ -116,59 +144,17 @@
     ctx.drawImage(image, Math.floor(x - dw / 2), Math.floor(y - dh / 2), dw, dh);
   }
 
-  // ============================================================
-  // Magenta keying for digits.jpg
-  // ============================================================
-  function keyOutMagentaToCanvas(sourceImg) {
-    const c = document.createElement("canvas");
-    c.width = sourceImg.width;
-    c.height = sourceImg.height;
-    const cctx = c.getContext("2d", { willReadFrequently: true });
-
-    cctx.imageSmoothingEnabled = false;
-    cctx.drawImage(sourceImg, 0, 0);
-
-    const imgData = cctx.getImageData(0, 0, c.width, c.height);
-    const data = imgData.data;
-
-    // JPEG will have compression noise, so use a tolerance.
-    // Target magenta: (255, 0, 255)
-    const tol = 70;
-
-    for (let i = 0; i < data.length; i += 4) {
-      const r = data[i + 0];
-      const g = data[i + 1];
-      const b = data[i + 2];
-
-      const isMagenta =
-        Math.abs(r - 255) <= tol &&
-        g <= tol && // green near 0
-        Math.abs(b - 255) <= tol;
-
-      if (isMagenta) {
-        data[i + 3] = 0; // alpha to 0
-      }
-    }
-
-    cctx.putImageData(imgData, 0, 0);
-    return c;
-  }
-
-  // ============================================================
-  // Score rendering (expects digits in ONE ROW 0–9)
-  // ============================================================
-  function drawScore(n) {
-    const dsrc = digitsKeyedCanvas;
-    if (!dsrc) return;
+  // ====== SCORE HUD (digits.png must be one row 0–9) ======
+  function drawScoreHud(n) {
+    const dimg = img.digits;
+    if (!dimg) return;
 
     scoreCtx.clearRect(0, 0, scoreCanvas.width, scoreCanvas.height);
 
     const text = String(n);
+    const digitW = Math.floor(dimg.width / 10);
+    const digitH = dimg.height;
 
-    const digitW = Math.floor(dsrc.width / 10);
-    const digitH = dsrc.height;
-
-    // Scale up a bit for readability in the HUD
     const scale = 2;
     const totalW = text.length * digitW * scale;
 
@@ -182,13 +168,11 @@
       if (d < 0 || d > 9) continue;
 
       const sx = d * digitW;
-
       scoreCtx.drawImage(
-        dsrc,
+        dimg,
         sx, 0, digitW, digitH,
         x, y, digitW * scale, digitH * scale
       );
-
       x += digitW * scale;
     }
   }
@@ -221,16 +205,17 @@
     }
   }
 
-  function playBlip() {
+  function playBlip(mult = 1) {
     ensureAudio();
     if (!audioCtx || !masterGain) return;
 
     const t = audioCtx.currentTime;
+    const base = 660 + (mult - 1) * 180;
 
     const osc = audioCtx.createOscillator();
     osc.type = "square";
-    osc.frequency.setValueAtTime(880, t);
-    osc.frequency.exponentialRampToValueAtTime(1320, t + 0.06);
+    osc.frequency.setValueAtTime(base, t);
+    osc.frequency.exponentialRampToValueAtTime(base * 1.6, t + 0.06);
 
     const g = audioCtx.createGain();
     g.gain.setValueAtTime(0.0001, t);
@@ -244,12 +229,13 @@
     osc.stop(t + 0.10);
   }
 
-  function playChomp() {
+  function playChomp(mult = 1) {
     ensureAudio();
     if (!audioCtx || !masterGain) return;
 
     const t = audioCtx.currentTime;
 
+    // Noise burst
     const duration = 0.12;
     const bufferSize = Math.floor(audioCtx.sampleRate * duration);
     const buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
@@ -267,11 +253,11 @@
 
     const filter = audioCtx.createBiquadFilter();
     filter.type = "lowpass";
-    filter.frequency.setValueAtTime(1200, t);
+    filter.frequency.setValueAtTime(1100 + (mult - 1) * 250, t);
 
     const g = audioCtx.createGain();
     g.gain.setValueAtTime(0.0001, t);
-    g.gain.exponentialRampToValueAtTime(0.5, t + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.55, t + 0.01);
     g.gain.exponentialRampToValueAtTime(0.0001, t + duration);
 
     noise.connect(filter);
@@ -281,14 +267,15 @@
     noise.start(t);
     noise.stop(t + duration);
 
+    // Low thunk
     const osc = audioCtx.createOscillator();
     osc.type = "triangle";
-    osc.frequency.setValueAtTime(180, t);
+    osc.frequency.setValueAtTime(170 - (mult - 1) * 10, t);
     osc.frequency.exponentialRampToValueAtTime(110, t + 0.09);
 
     const g2 = audioCtx.createGain();
     g2.gain.setValueAtTime(0.0001, t);
-    g2.gain.exponentialRampToValueAtTime(0.25, t + 0.01);
+    g2.gain.exponentialRampToValueAtTime(0.30 + (mult - 1) * 0.05, t + 0.01);
     g2.gain.exponentialRampToValueAtTime(0.0001, t + 0.10);
 
     osc.connect(g2);
@@ -299,18 +286,23 @@
   }
 
   // ============================================================
-  // GAME ACTIONS
+  // GAME LOGIC
   // ============================================================
   function startGame() {
     state = GameState.PLAY;
-    hint.textContent = "Tap FEED to score.";
 
     score = 0;
-    drawScore(score);
-
+    combo = 1;
+    lastFeedTs = 0;
     burgerActive = false;
     chewUntil = 0;
     popups.length = 0;
+    shakeUntil = 0;
+    shakePower = 0;
+
+    drawScoreHud(score);
+
+    hint.textContent = `High Score: ${highScore}`;
 
     // iOS requirement: init audio from a gesture
     ensureAudio();
@@ -322,29 +314,75 @@
     }
   }
 
-  function addPopup(amount) {
+  function addPopup(amount, mult) {
+    const label = mult > 1 ? `+${amount}  (${mult}x)` : `+${amount}`;
     popups.push({
       x: W / 2,
       y: BURGER.endY - 18,
       startTs: now(),
       amount,
+      text: label,
     });
+  }
+
+  function setShake(power) {
+    shakePower = power;
+    shakeUntil = now() + SHAKE_MS;
+  }
+
+  function updateCombo(ts) {
+    if (!lastFeedTs) {
+      combo = 1;
+      return;
+    }
+    const dt = ts - lastFeedTs;
+    if (dt <= COMBO_WINDOW_MS) {
+      combo = clamp(combo + 1, 1, COMBO_MAX);
+    } else {
+      combo = 1;
+    }
   }
 
   function doFeed() {
     if (state !== GameState.PLAY) return;
 
-    playBlip();
+    const ts = now();
 
-    mouthOpenUntil = now() + MOUTH_OPEN_MS;
+    // combo logic
+    updateCombo(ts);
+    lastFeedTs = ts;
 
+    const mult = combo;          // 1..3
+    const points = mult;         // 1x=1, 2x=2, 3x=3
+
+    // SFX: higher pitch with combo
+    playBlip(mult);
+
+    // Visuals
+    mouthOpenUntil = ts + MOUTH_OPEN_MS;
     burgerActive = true;
-    burgerStartTs = now();
+    burgerStartTs = ts;
 
-    score += 1;
-    drawScore(score);
+    // Scoring
+    score += points;
+    drawScoreHud(score);
+    addPopup(points, mult);
 
-    addPopup(1);
+    // Big bite effects
+    if (mult >= BIG_BITE_SHAKE_AT) {
+      setShake(6);
+    } else if (mult === 2) {
+      setShake(3);
+    }
+
+    // High score saving
+    if (score > highScore) {
+      highScore = score;
+      saveHighScore(highScore);
+      hint.textContent = `New High Score: ${highScore}`;
+    } else {
+      hint.textContent = `High Score: ${highScore}`;
+    }
   }
 
   // ============================================================
@@ -372,18 +410,20 @@
   // RENDER
   // ============================================================
   function renderTitle() {
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.fillStyle = "#000";
     ctx.fillRect(0, 0, W, H);
 
     if (img.title) drawCover(img.title);
 
     ctx.fillStyle = "rgba(0,0,0,0.45)";
-    ctx.fillRect(0, H - 56, W, 56);
+    ctx.fillRect(0, H - 64, W, 64);
 
     ctx.fillStyle = "#fff";
     ctx.font = "16px system-ui, sans-serif";
     ctx.textAlign = "center";
-    ctx.fillText("Tap screen or press FEED to start", W / 2, H - 24);
+    ctx.fillText("Tap screen or press FEED to start", W / 2, H - 36);
+    ctx.fillText(`High Score: ${highScore}`, W / 2, H - 16);
   }
 
   function renderPopups(ts) {
@@ -400,12 +440,11 @@
       ctx.fillStyle = "#ffffff";
       ctx.strokeStyle = "#000000";
       ctx.lineWidth = 3;
-      ctx.font = "24px system-ui, sans-serif";
+      ctx.font = "22px system-ui, sans-serif";
       ctx.textAlign = "center";
 
-      const text = `+${p.amount}`;
-      ctx.strokeText(text, p.x, y);
-      ctx.fillText(text, p.x, y);
+      ctx.strokeText(p.text, p.x, y);
+      ctx.fillText(p.text, p.x, y);
 
       ctx.restore();
 
@@ -414,15 +453,24 @@
   }
 
   function renderPlay(ts) {
+    // Screen shake transform
+    let ox = 0, oy = 0;
+    if (ts < shakeUntil) {
+      const p = (shakeUntil - ts) / SHAKE_MS; // 1..0
+      const mag = shakePower * p;
+      ox = (Math.random() * 2 - 1) * mag;
+      oy = (Math.random() * 2 - 1) * mag;
+    }
+    ctx.setTransform(1, 0, 0, 1, ox, oy);
+
     ctx.fillStyle = "#000";
-    ctx.fillRect(0, 0, W, H);
+    ctx.fillRect(-ox, -oy, W, H);
 
     if (img.background) drawCover(img.background);
 
     const michaelScale = computeMichaelScale();
 
     let michaelFrame = img.idle;
-
     if (ts < chewUntil) {
       const phase = Math.floor(ts / CHEW_FRAME_MS) % 2;
       michaelFrame = phase === 0 ? img.open : img.idle;
@@ -436,6 +484,7 @@
       drawCenteredScaled(michaelFrame, MICHAEL_POS.x, MICHAEL_POS.y, michaelScale);
     }
 
+    // Burger flight
     if (burgerActive && img.burger) {
       const t0 = (ts - burgerStartTs) / BURGER.durationMs;
       const t = clamp(t0, 0, 1);
@@ -458,11 +507,14 @@
       if (t >= 1) {
         burgerActive = false;
         chewUntil = ts + CHEW_TOTAL_MS;
-        playChomp();
+        playChomp(combo);
       }
     }
 
     renderPopups(ts);
+
+    // Reset transform back to normal for safety
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
   }
 
   function loop(ts) {
@@ -480,18 +532,14 @@
   async function boot() {
     hint.textContent = "Loading…";
 
-    const entries = Object.entries(ASSETS);
-    for (const [key, src] of entries) {
+    for (const [key, src] of Object.entries(ASSETS)) {
       img[key] = await loadImage(src);
     }
 
-    // Convert digits.jpg magenta background to transparency once
-    digitsKeyedCanvas = keyOutMagentaToCanvas(img.digits);
-
     skinFeedButton();
-    drawScore(score);
+    drawScoreHud(score);
 
-    hint.textContent = "Tap the screen to start.";
+    hint.textContent = `High Score: ${highScore}`;
     requestAnimationFrame(loop);
   }
 
