@@ -1,89 +1,76 @@
-:root {
-  --bg: #0b0b0f;
-  --uiText: #ffffff;
+body{
+margin:0;
+background:black;
+font-family:Arial;
+overflow:hidden;
 }
 
-* { box-sizing: border-box; }
-
-html, body {
-  height: 100%;
-  margin: 0;
-  background: var(--bg);
-  color: var(--uiText);
-  font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+#game{
+position:relative;
+width:100vw;
+height:100vh;
 }
 
-#app {
-  height: 100svh;
-  display: grid;
-  place-items: center;
-  padding:
-    calc(10px + env(safe-area-inset-top))
-    calc(10px + env(safe-area-inset-right))
-    calc(10px + env(safe-area-inset-bottom))
-    calc(10px + env(safe-area-inset-left));
+canvas{
+image-rendering:pixelated;
 }
 
-#game {
-  aspect-ratio: 9 / 16;
-  width: min(100vw, 430px);
-  height: auto;
-  max-height: 88svh;
-  border-radius: 18px;
-  background: #000;
-  image-rendering: pixelated;
-  image-rendering: crisp-edges;
-  touch-action: none;
-  display: block;
+#gameCanvas{
+position:absolute;
+top:0;
+left:0;
+width:100vw;
+height:100vh;
 }
 
-#ui {
-  width: min(100vw, 430px);
-  display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 10px;
-  align-items: center;
-  margin-top: 10px;
+#hud{
+position:absolute;
+bottom:20px;
+width:100%;
+display:flex;
+justify-content:space-between;
+align-items:center;
+padding:20px;
+box-sizing:border-box;
 }
 
-#scoreWrap {
-  display: grid;
-  gap: 6px;
+#feedButton{
+width:120px;
+height:60px;
+background:url("assets/feed_button.png");
+background-size:contain;
+background-repeat:no-repeat;
+border:none;
 }
 
-#scoreWrap .label {
-  font-size: 12px;
-  letter-spacing: 0.12em;
-  opacity: 0.85;
+#scoreContainer{
+color:white;
+font-size:12px;
 }
 
-#score {
-  width: 260px;
-  height: 42px;
-  image-rendering: pixelated;
-  image-rendering: crisp-edges;
+#scoreCanvas{
+width:200px;
+height:50px;
 }
 
-#feedBtn {
-  width: 160px;
-  height: 56px;
-  border: none;
-  border-radius: 12px;
-  background: #1b1b24;
-  color: #fff;
-  font-size: 18px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  cursor: pointer;
-  touch-action: manipulation;
+#startScreen{
+position:absolute;
+width:100%;
+height:100%;
+background:black;
+display:flex;
+flex-direction:column;
+align-items:center;
+justify-content:center;
+z-index:10;
 }
 
-#feedBtn:active { transform: translateY(1px); }
+#titleImage{
+width:70%;
+}
 
-#hint {
-  width: min(100vw, 430px);
-  margin-top: 8px;
-  opacity: 0.8;
-  font-size: 13px;
-  text-align: center;
+#startButton{
+margin-top:30px;
+font-size:24px;
+padding:15px 40px;
 }
