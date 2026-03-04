@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Feed Michael</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div id="app">
+    <canvas id="game" width="360" height="640" aria-label="Feed Michael game"></canvas>
+
+    <!-- HUD / UI -->
+    <div id="ui">
+      <div id="scoreWrap" aria-live="polite">
+        <span class="label">SCORE</span>
+        <canvas id="score" width="160" height="40"></canvas>
+      </div>
+
+      <button id="feedBtn" type="button">FEED</button>
+    </div>
+
+    <div id="hint"></div>
+  </div>
+
+  <script src="game.js"></script>
+</body>
+</html>
