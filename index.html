@@ -1,36 +1,38 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
 <title>Feed Michael</title>
-<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="style.css" />
 </head>
-
 <body>
 
-<div id="game">
+<div id="game" aria-label="Feed Michael game area" role="application">
 
-    <div id="startScreen">
-        <img id="titleImage" src="assets/title.png">
-        <button id="startButton">START</button>
-    </div>
+  <div id="startScreen">
+    <img id="titleImage" src="assets/title.png" alt="Feed Michael Title">
+    <button id="startButton" aria-label="Start game">START</button>
+  </div>
 
+  <!-- Virtual game surface container keeps aspect ratio; the canvas scales inside -->
+  <div id="canvasHolder">
     <canvas id="gameCanvas"></canvas>
+  </div>
 
-    <div id="hud">
-        <div id="scoreContainer">
-            <span>SCORE</span>
-            <canvas id="scoreCanvas"></canvas>
-        </div>
-
-        <button id="feedButton"></button>
+  <div id="hud" aria-label=" Heads up display">
+    <div id="scoreContainer">
+      <span>SCORE</span>
+      <canvas id="scoreCanvas" aria-label="Score digits"></canvas>
     </div>
+
+    <button id="feedButton" aria-label="Feed button"></button>
+  </div>
 
 </div>
 
 <audio id="bgMusic" loop>
-<source src="assets/theme_music.wav" type="audio/wav">
+  <source src="assets/theme_music.wav" type="audio/wav" />
 </audio>
 
 <script src="game.js"></script>
