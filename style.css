@@ -14,7 +14,7 @@ html, body {
 }
 
 #app {
-  height: 100svh; /* best for iOS Safari */
+  height: 100svh;
   display: grid;
   place-items: center;
   padding:
@@ -78,9 +78,7 @@ html, body {
   touch-action: manipulation;
 }
 
-#feedBtn:active {
-  transform: translateY(1px);
-}
+#feedBtn:active { transform: translateY(1px); }
 
 #hint {
   width: min(100vw, 430px);
