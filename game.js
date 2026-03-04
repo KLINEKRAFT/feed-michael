@@ -11,7 +11,6 @@
   };
 
   // ====== CANVAS INTERNAL RESOLUTION ======
-  // Keep a stable internal resolution; CSS scales it to fit the phone.
   const W = 360;
   const H = 640;
 
@@ -162,6 +161,109 @@
     htmlFeedBtn.style.color = "transparent";
   }
 
+  // ============================================================
+  //  WebAudio SFX (NO FILES)
+  // ============================================================
+  let audioCtx = null;
+  let masterGain = null;
+  let sfxEnabled = true;
+
+  function ensureAudio() {
+    if (!sfxEnabled) return;
+    if (!audioCtx) {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      audioCtx = new AC();
+      masterGain = audioCtx.createGain();
+      masterGain.gain.value = 0.35; // overall SFX volume
+      masterGain.connect(audioCtx.destination);
+    }
+    if (audioCtx.state === "suspended") {
+      audioCtx.resume().catch(() => {});
+    }
+  }
+
+  function playBlip() {
+    if (!sfxEnabled) return;
+    ensureAudio();
+    if (!audioCtx || !masterGain) return;
+
+    const t = audioCtx.currentTime;
+
+    const osc = audioCtx.createOscillator();
+    osc.type = "square"; // retro
+    osc.frequency.setValueAtTime(880, t);
+    osc.frequency.exponentialRampToValueAtTime(1320, t + 0.06);
+
+    const g = audioCtx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.35, t + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.09);
+
+    osc.connect(g);
+    g.connect(masterGain);
+
+    osc.start(t);
+    osc.stop(t + 0.10);
+  }
+
+  function playChomp() {
+    if (!sfxEnabled) return;
+    ensureAudio();
+    if (!audioCtx || !masterGain) return;
+
+    const t = audioCtx.currentTime;
+
+    // Create a quick noise burst (bite texture)
+    const duration = 0.12;
+    const bufferSize = Math.floor(audioCtx.sampleRate * duration);
+    const buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
+    const data = buffer.getChannelData(0);
+
+    // Pink-ish noise-ish (simple filtered randomness)
+    let last = 0;
+    for (let i = 0; i < bufferSize; i++) {
+      const white = (Math.random() * 2 - 1);
+      last = (last * 0.85) + (white * 0.15);
+      data[i] = last;
+    }
+
+    const noise = audioCtx.createBufferSource();
+    noise.buffer = buffer;
+
+    const filter = audioCtx.createBiquadFilter();
+    filter.type = "lowpass";
+    filter.frequency.setValueAtTime(1200, t);
+
+    const g = audioCtx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.5, t + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + duration);
+
+    noise.connect(filter);
+    filter.connect(g);
+    g.connect(masterGain);
+
+    noise.start(t);
+    noise.stop(t + duration);
+
+    // Add a tiny “thunk” tone under it
+    const osc = audioCtx.createOscillator();
+    osc.type = "triangle";
+    osc.frequency.setValueAtTime(180, t);
+    osc.frequency.exponentialRampToValueAtTime(110, t + 0.09);
+
+    const g2 = audioCtx.createGain();
+    g2.gain.setValueAtTime(0.0001, t);
+    g2.gain.exponentialRampToValueAtTime(0.25, t + 0.01);
+    g2.gain.exponentialRampToValueAtTime(0.0001, t + 0.10);
+
+    osc.connect(g2);
+    g2.connect(masterGain);
+
+    osc.start(t);
+    osc.stop(t + 0.11);
+  }
+
   // ====== ACTIONS ======
   function startGame() {
     state = GameState.PLAY;
@@ -173,6 +275,9 @@
     burgerActive = false;
     chewUntil = 0;
     popups.length = 0;
+
+    // Ensure SFX works on iOS after first gesture
+    ensureAudio();
 
     // Start music after user gesture (iOS/Safari requirement)
     if (music) {
@@ -192,6 +297,9 @@
 
   function doFeed() {
     if (state !== GameState.PLAY) return;
+
+    // SFX: button press blip
+    playBlip();
 
     // Open mouth briefly right away
     mouthOpenUntil = now() + MOUTH_OPEN_MS;
@@ -280,9 +388,6 @@
     const michaelScale = computeMichaelScale();
 
     // Choose Michael frame:
-    // - During chew: alternate open/idle
-    // - Else if mouth-open window: open
-    // - Else: idle
     let michaelFrame = img.idle;
 
     if (ts < chewUntil) {
@@ -323,6 +428,9 @@
       if (t >= 1) {
         burgerActive = false;
         chewUntil = ts + CHEW_TOTAL_MS;
+
+        // SFX: chomp when it "hits" the mouth
+        playChomp();
       }
     }
 
